@@ -424,8 +424,9 @@ Device Flow Authentication Timeout
   <data name="RequestHandlerCancelingExceptionMessage" xml:space="preserve">
     <value>Ignoring a cancellation exception during request handling. Exception: {0}, Message: {1}</value>
   </data>
-  <data name="ShuttingDown" xml:space="preserve">
-    <value>Credential provider shutting down.</value>
+  <data name="ShuttingDownCancellationError" xml:space="preserve">
+    <value>During credential provider shutdown, a cancellation error occurred:
+{0}</value>
   </data>
   <data name="StartRequestHandlerStopwatch" xml:space="preserve">
     <value>Starting stopwatch for {1} {2}</value>
@@ -438,5 +439,14 @@ Device Flow Authentication Timeout
   </data>
   <data name="SessionTokenCacheMutexMiss" xml:space="preserve">
     <value>Another instance of CredentialProvider is accessing the credential cache, waiting for it to become available.</value>
+  </data>
+  <data name="PluginThrewOperationCanceledException" xml:space="preserve">
+    <value>Plugin threw OperationCanceledException</value>
+  </data>
+  <data name="PluginBeforeClose" xml:space="preserve">
+    <value>Plugin is about to close</value>
+  </data>
+  <data name="PluginClosed" xml:space="preserve">
+    <value>Plugin closed</value>
   </data>
 </root>

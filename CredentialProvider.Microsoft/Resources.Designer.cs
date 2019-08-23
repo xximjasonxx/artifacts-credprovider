@@ -19,7 +19,7 @@ namespace NuGetCredentialProvider {
     // class via a tool like ResGen or Visual Studio.
     // To add or remove a member, edit your .ResX file then rerun ResGen
     // with the /str option, or rebuild your VS project.
-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "15.0.0.0")]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "16.0.0.0")]
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal class Resources {
@@ -551,6 +551,33 @@ namespace NuGetCredentialProvider {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Plugin is about to close.
+        /// </summary>
+        internal static string PluginBeforeClose {
+            get {
+                return ResourceManager.GetString("PluginBeforeClose", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Plugin closed.
+        /// </summary>
+        internal static string PluginClosed {
+            get {
+                return ResourceManager.GetString("PluginClosed", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Plugin threw OperationCanceledException.
+        /// </summary>
+        internal static string PluginThrewOperationCanceledException {
+            get {
+                return ResourceManager.GetString("PluginThrewOperationCanceledException", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Timed out waiting for plug-in operations to complete.
         /// </summary>
         internal static string PluginTimedOut {
@@ -659,11 +686,12 @@ namespace NuGetCredentialProvider {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Credential provider shutting down..
+        ///   Looks up a localized string similar to During credential provider shutdown, a cancellation error occurred:
+        ///{0}.
         /// </summary>
-        internal static string ShuttingDown {
+        internal static string ShuttingDownCancellationError {
             get {
-                return ResourceManager.GetString("ShuttingDown", resourceCulture);
+                return ResourceManager.GetString("ShuttingDownCancellationError", resourceCulture);
             }
         }
         

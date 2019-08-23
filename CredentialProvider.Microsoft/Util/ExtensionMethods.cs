@@ -65,6 +65,16 @@ namespace NuGetCredentialProvider.Util
         }
 
         /// <summary>
+        /// Writes a <see cref="LogLevel.Debug"/> event message to the <see cref="ILogger"/> using the specified message.
+        /// </summary>
+        /// <param name="logger">A <see cref="ILogger"/> instance to write the message to.</param>
+        /// <param name="message">The message.</param>
+        public static void Debug(this ILogger logger, string message)
+        {
+            logger.Log(LogLevel.Debug, message);
+        }
+
+        /// <summary>
         /// Converts the current <see cref="Uri"/> with just the host by discarding the other parts like path and querystrings.
         /// </summary>
         /// <param name="uri">The current <see cref="Uri"/> to convert.</param>

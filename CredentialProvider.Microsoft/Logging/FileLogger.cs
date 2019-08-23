@@ -2,23 +2,53 @@
 //
 // Licensed under the MIT license.
 
+using System;
 using System.IO;
 using NuGet.Common;
 
 namespace NuGetCredentialProvider.Logging
 {
-    internal class FileLogger : LoggerBase
+    internal class FileLogger : ILogger, IDisposable
     {
-        private readonly string filePath;
+        Lazy<StreamWriter> lazyWriter;
 
         internal FileLogger(string filePath)
         {
-            this.filePath = filePath;
+            lazyWriter = new Lazy<StreamWriter>(() => new StreamWriter(new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite)));
         }
 
-        protected override void WriteLog(LogLevel logLevel, string message)
+        public void SetLogLevel(LogLevel newLogLevel)
         {
-            File.AppendAllText(filePath, $"[{logLevel}] {message}\n");
+            // If enabled, FileLogger always logs all messages for diagnostic purposes
         }
+
+        public void Log(LogLevel logLevel, string message)
+        {
+            lazyWriter.Value.WriteLine($"[{logLevel}] {message}");
+        }
+
+        #region IDisposable Support
+        private bool disposed = false;
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                if (disposing && lazyWriter.IsValueCreated)
+                {
+                    lazyWriter.Value.Dispose();
+                }
+
+                disposed = true;
+            }
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        #endregion
     }
 }

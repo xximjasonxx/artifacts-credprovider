@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using NuGet.Protocol.Plugins;
+using NuGet.Versioning;
 using NuGetCredentialProvider.CredentialProviders;
 using NuGetCredentialProvider.CredentialProviders.Vsts;
 using NuGetCredentialProvider.CredentialProviders.VstsBuildTask;
@@ -133,7 +134,7 @@ namespace NuGetCredentialProvider
                 {
                     try
                     {
-                        using (IPlugin plugin = await PluginFactory.CreateFromCurrentProcessAsync(requestHandlers, ConnectionOptions.CreateDefault(), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false))
+                        using (IPlugin plugin = await PluginFactory.CreateFromCurrentProcessAsync(requestHandlers, new ConnectionOptions(SemanticVersion.Parse("2.0.0"), SemanticVersion.Parse("2.0.0"), TimeSpan.FromMilliseconds(1000), TimeSpan.FromMilliseconds(1000)), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false))
                         {
                             multiLogger.Add(new PluginConnectionLogger(plugin.Connection));
                             multiLogger.Verbose(Resources.RunningInPlugin);
@@ -142,10 +143,10 @@ namespace NuGetCredentialProvider
                             await RunNuGetPluginsAsync(plugin, multiLogger, TimeSpan.FromMinutes(2), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false);
                         }
                     }
-                    catch (TaskCanceledException)
+                    catch (OperationCanceledException ex)
                     {
-                        // When restoring from multiple sources, one of the sources will throw an unhandled TaskCanceledException
-                        // if it has been restored successfully from a different source. We catch the exception and silently exit.
+                        // NuGet may cancel the connection before it's fully established, e.g. if it resolved the package from another package source.
+                        multiLogger.Debug(Resources.PluginThrewOperationCanceledException + Environment.NewLine + ex.ToString());
                     }
 
                     return 0;
@@ -200,6 +201,8 @@ namespace NuGetCredentialProvider
                 {
                     credentialProvider.Dispose();
                 }
+
+                fileLogger?.Dispose();
             }
         }
 
@@ -213,9 +216,17 @@ namespace NuGetCredentialProvider
                 logger.Error(a.Exception.ToString());
             };
 
-            plugin.BeforeClose += (sender, args) => Volatile.Write(ref shuttingDown, true);
+            plugin.BeforeClose += (sender, args) =>
+            {
+                logger.Debug(Resources.PluginBeforeClose);
+                Volatile.Write(ref shuttingDown, true); 
+            };
 
-            plugin.Closed += (sender, a) => semaphore.Release();
+            plugin.Closed += (sender, a) =>
+            {
+                logger.Debug(Resources.PluginClosed);
+                semaphore.Release();
+            };
 
             bool complete = await semaphore.WaitAsync(timeout, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 

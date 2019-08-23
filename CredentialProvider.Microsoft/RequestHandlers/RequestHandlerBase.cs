@@ -36,11 +36,6 @@ namespace NuGetCredentialProvider.RequestHandlers
         public virtual CancellationToken CancellationToken { get; private set; } = CancellationToken.None;
 
         /// <summary>
-        /// Gets the current <see cref="IConnection"/>.
-        /// </summary>
-        public IConnection Connection { get; private set; }
-
-        /// <summary>
         /// Gets the current <see cref="ILogger"/> to use for logging.
         /// </summary>
         public ILogger Logger { get; }
@@ -51,14 +46,14 @@ namespace NuGetCredentialProvider.RequestHandlers
             Stopwatch timer = new Stopwatch();
             timer.Start();
 
-            Connection = connection;
-
             TRequest request = MessageUtilities.DeserializePayload<TRequest>(message);
 
-            try {
+            try
+            {
                 TResponse response = null;
                 Logger.Verbose(string.Format(Resources.HandlingRequest, message.Type, message.Method, timer.ElapsedMilliseconds, message.Payload.ToString(Formatting.None)));
-                try {
+                try
+                {
                     using (GetProgressReporter(connection, message, cancellationToken))
                     {
                         response = await HandleRequestAsync(request).ConfigureAwait(continueOnCapturedContext: false);
@@ -70,31 +65,27 @@ namespace NuGetCredentialProvider.RequestHandlers
                     Logger.Verbose(string.Format(Resources.RequestHandlerCancelingExceptionMessage, ex.InnerException, ex.Message));
                     return;
                 }
+
                 Logger.Verbose(string.Format(Resources.SendingResponse, message.Type, message.Method, timer.ElapsedMilliseconds));
-                // If we did not send a cancel message, we must submit the response even if cancellationToken is canceled.
+
+                // If we did not send a cancel message, we must submit the response even if cancellationToken is canceled. - TODO zarenner: why? needs explanation
                 await responseHandler.SendResponseAsync(message, response, CancellationToken.None).ConfigureAwait(continueOnCapturedContext: false);
 
                 Logger.Verbose(string.Format(Resources.TimeElapsedAfterSendingResponse, message.Type, message.Method, timer.ElapsedMilliseconds));
             }
-            catch (Exception ex) when (LogExceptionAndReturnFalse(ex))
+            catch (Exception ex)
             {
+                // swallow cancellations during shutdown, they're most likely not interesting.
+                if (ex is OperationCanceledException && Program.IsShuttingDown)
+                {
+                    Logger.Debug(string.Format(Resources.ShuttingDownCancellationError, ex.ToString()));
+                    return;
+                }
+
+                Logger.Verbose(string.Format(Resources.ResponseHandlerException, message.Method, message.RequestId) + Environment.NewLine + ex.ToString());
                 throw;
             }
 
-            bool LogExceptionAndReturnFalse(Exception ex)
-            {
-                // don't report cancellations during shutdown, they're most likely not interesting.
-                if (ex is OperationCanceledException && Program.IsShuttingDown && !Debugger.IsAttached)
-                {
-                    Logger.Verbose(Resources.ShuttingDown);
-                    return false;
-                }
-
-                Logger.Verbose(string.Format(Resources.ResponseHandlerException, message.Method, message.RequestId));
-                Logger.Verbose(ex.ToString());
-                return false;
-            }
-            
             timer.Stop();
         }
 
