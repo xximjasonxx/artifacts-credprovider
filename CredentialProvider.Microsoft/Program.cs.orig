@@ -134,7 +134,6 @@ namespace NuGetCredentialProvider
                 {
                     try
                     {
-                        multiLogger.Debug("Using defaults for connectionoptions");
                         using (IPlugin plugin = await PluginFactory.CreateFromCurrentProcessAsync(requestHandlers, ConnectionOptions.CreateDefault(), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false))
                         {
                             multiLogger.Add(new PluginConnectionLogger(plugin.Connection));
@@ -144,10 +143,17 @@ namespace NuGetCredentialProvider
                             await RunNuGetPluginsAsync(plugin, multiLogger, TimeSpan.FromMinutes(2), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false);
                         }
                     }
+<<<<<<< HEAD
+                    catch (TaskCanceledException)
+                    {
+                        // When restoring from multiple sources, one of the sources will throw an unhandled TaskCanceledException
+                        // if it has been restored successfully from a different source. We catch the exception and silently exit.
+=======
                     catch (OperationCanceledException ex)
                     {
-                        // NuGet may cancel the connection before it's fully established, e.g. if it resolved the package from another package source.
-                        multiLogger.Debug(Resources.PluginThrewOperationCanceledException + Environment.NewLine + ex.ToString());
+                        // Note: May or may not have the plugin logger, but will at least log to file if enabled
+                        multiLogger.Verbose(Resources.PluginThrewOperationCanceledException + Environment.NewLine + ex.ToString());
+>>>>>>> b4de64a... Task cancelation and logging improvements
                     }
 
                     return 0;
@@ -217,17 +223,9 @@ namespace NuGetCredentialProvider
                 logger.Error(a.Exception.ToString());
             };
 
-            plugin.BeforeClose += (sender, args) =>
-            {
-                logger.Debug(Resources.PluginBeforeClose);
-                Volatile.Write(ref shuttingDown, true); 
-            };
+            plugin.BeforeClose += (sender, args) => Volatile.Write(ref shuttingDown, true);
 
-            plugin.Closed += (sender, a) =>
-            {
-                logger.Debug(Resources.PluginClosed);
-                semaphore.Release();
-            };
+            plugin.Closed += (sender, a) => semaphore.Release();
 
             bool complete = await semaphore.WaitAsync(timeout, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 

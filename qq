@@ -1,0 +1,379 @@
+[1mdiff --git a/CredentialProvider.Microsoft/Logging/FileLogger.cs b/CredentialProvider.Microsoft/Logging/FileLogger.cs[m
+[1mindex 1636ab3..c9f000b 100644[m
+[1m--- a/CredentialProvider.Microsoft/Logging/FileLogger.cs[m
+[1m+++ b/CredentialProvider.Microsoft/Logging/FileLogger.cs[m
+[36m@@ -2,23 +2,60 @@[m
+ //[m
+ // Licensed under the MIT license.[m
+ [m
+[32m+[m[32musing System;[m
+ using System.IO;[m
+ using NuGet.Common;[m
+ [m
+ namespace NuGetCredentialProvider.Logging[m
+ {[m
+[31m-    internal class FileLogger : LoggerBase[m
+[32m+[m[32m    internal class FileLogger : ILogger, IDisposable[m
+     {[m
+         private readonly string filePath;[m
+[32m+[m[32m        Lazy<StreamWriter> lazyWriter;[m
+ [m
+         internal FileLogger(string filePath)[m
+         {[m
+             this.filePath = filePath;[m
+[32m+[m[32m            lazyWriter = new Lazy<StreamWriter>(GetFileStreamWriter);[m
+         }[m
+ [m
+[31m-        protected override void WriteLog(LogLevel logLevel, string message)[m
+[32m+[m[32m        private StreamWriter GetFileStreamWriter()[m
+         {[m
+[31m-            File.AppendAllText(filePath, $"[{logLevel}] {message}\n");[m
+[32m+[m[32m            return new StreamWriter(new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite));[m
+         }[m
+[32m+[m
+[32m+[m[32m        public void SetLogLevel(LogLevel newLogLevel)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            // If enabled, FileLogger always logs all messages for diagnostic purposes[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        public void Log(LogLevel logLevel, string message)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            lazyWriter.Value.WriteLine($"[{logLevel}] {message}");[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        #region IDisposable Support[m
+[32m+[m[32m        private bool disposed = false;[m
+[32m+[m
+[32m+[m[32m        protected virtual void Dispose(bool disposing)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            if (!disposed)[m
+[32m+[m[32m            {[m
+[32m+[m[32m                if (disposing && lazyWriter.IsValueCreated)[m
+[32m+[m[32m                {[m
+[32m+[m[32m                    lazyWriter.Value.Dispose();[m
+[32m+[m[32m                }[m
+[32m+[m
+[32m+[m[32m                disposed = true;[m
+[32m+[m[32m            }[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        public void Dispose()[m
+[32m+[m[32m        {[m
+[32m+[m[32m            Dispose(true);[m
+[32m+[m[32m            GC.SuppressFinalize(this);[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        #endregion[m
+     }[m
+ }[m
+[1mdiff --git a/CredentialProvider.Microsoft/Logging/PluginConnectionLogger.cs b/CredentialProvider.Microsoft/Logging/PluginConnectionLogger.cs[m
+[1mindex 2ed8dc7..d5d44fa 100644[m
+[1m--- a/CredentialProvider.Microsoft/Logging/PluginConnectionLogger.cs[m
+[1m+++ b/CredentialProvider.Microsoft/Logging/PluginConnectionLogger.cs[m
+[36m@@ -20,10 +20,24 @@[m [mnamespace NuGetCredentialProvider.Logging[m
+         protected override void WriteLog(LogLevel logLevel, string message)[m
+         {[m
+             // intentionally not awaiting here -- don't want to block forward progress just because we tried to log.[m
+[31m-            connection.SendRequestAndReceiveResponseAsync<LogRequest, LogResponse>([m
+[31m-                MessageMethod.Log,[m
+[31m-                new LogRequest(logLevel, $"    {message}"),[m
+[31m-                CancellationToken.None);[m
+[32m+[m[32m            FireAndForgetLog(logLevel, message);[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        private async void FireAndForgetLog(LogLevel logLevel, string message)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            try[m
+[32m+[m[32m            {[m
+[32m+[m[32m                await connection.SendRequestAndReceiveResponseAsync<LogRequest, LogResponse>([m
+[32m+[m[32m                    MessageMethod.Log,[m
+[32m+[m[32m                    new LogRequest(logLevel, $"    {message}"),[m
+[32m+[m[32m                    CancellationToken.None);[m
+[32m+[m[32m            }[m
+[32m+[m[32m            catch[m
+[32m+[m[32m            {[m
+[32m+[m[32m                // Intentionally empty.[m
+[32m+[m[32m                // It's possible we'll fail to log if the plugin connection is in a bad state.[m
+[32m+[m[32m                // Other loggers if attached will capture the actual error. This failure to log is likely not interesting enough to log to stderr.[m
+[32m+[m[32m            }[m
+         }[m
+     }[m
+ }[m
+[1mdiff --git a/CredentialProvider.Microsoft/Program.cs b/CredentialProvider.Microsoft/Program.cs[m
+[1mindex f1eb138..9e9aed8 100644[m
+[1m--- a/CredentialProvider.Microsoft/Program.cs[m
+[1m+++ b/CredentialProvider.Microsoft/Program.cs[m
+[36m@@ -11,6 +11,7 @@[m [musing System.Threading;[m
+ using System.Threading.Tasks;[m
+ using Newtonsoft.Json;[m
+ using NuGet.Protocol.Plugins;[m
+[32m+[m[32musing NuGet.Versioning;[m
+ using NuGetCredentialProvider.CredentialProviders;[m
+ using NuGetCredentialProvider.CredentialProviders.Vsts;[m
+ using NuGetCredentialProvider.CredentialProviders.VstsBuildTask;[m
+[36m@@ -133,7 +134,7 @@[m [mnamespace NuGetCredentialProvider[m
+                 {[m
+                     try[m
+                     {[m
+[31m-                        using (IPlugin plugin = await PluginFactory.CreateFromCurrentProcessAsync(requestHandlers, ConnectionOptions.CreateDefault(), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false))[m
+[32m+[m[32m                        using (IPlugin plugin = await PluginFactory.CreateFromCurrentProcessAsync(requestHandlers, new ConnectionOptions(SemanticVersion.Parse("2.0.0"), SemanticVersion.Parse("2.0.0"), TimeSpan.FromMilliseconds(1000), TimeSpan.FromMilliseconds(1000)), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false))[m
+                         {[m
+                             multiLogger.Add(new PluginConnectionLogger(plugin.Connection));[m
+                             multiLogger.Verbose(Resources.RunningInPlugin);[m
+[36m@@ -142,10 +143,9 @@[m [mnamespace NuGetCredentialProvider[m
+                             await RunNuGetPluginsAsync(plugin, multiLogger, TimeSpan.FromMinutes(2), tokenSource.Token).ConfigureAwait(continueOnCapturedContext: false);[m
+                         }[m
+                     }[m
+[31m-                    catch (TaskCanceledException)[m
+[32m+[m[32m                    catch (OperationCanceledException ex)[m
+                     {[m
+[31m-                        // When restoring from multiple sources, one of the sources will throw an unhandled TaskCanceledException[m
+[31m-                        // if it has been restored successfully from a different source. We catch the exception and silently exit.[m
+[32m+[m[32m                        multiLogger.Debug(Resources.PluginThrewOperationCanceledException + Environment.NewLine + ex.ToString());[m
+                     }[m
+ [m
+                     return 0;[m
+[36m@@ -200,6 +200,8 @@[m [mnamespace NuGetCredentialProvider[m
+                 {[m
+                     credentialProvider.Dispose();[m
+                 }[m
+[32m+[m
+[32m+[m[32m                fileLogger?.Dispose();[m
+             }[m
+         }[m
+ [m
+[36m@@ -213,9 +215,17 @@[m [mnamespace NuGetCredentialProvider[m
+                 logger.Error(a.Exception.ToString());[m
+             };[m
+ [m
+[31m-            plugin.BeforeClose += (sender, args) => Volatile.Write(ref shuttingDown, true);[m
+[32m+[m[32m            plugin.BeforeClose += (sender, args) =>[m
+[32m+[m[32m            {[m
+[32m+[m[32m                logger.Debug(Resources.PluginBeforeClose);[m
+[32m+[m[32m                Volatile.Write(ref shuttingDown, true);[m[41m [m
+[32m+[m[32m            };[m
+ [m
+[31m-            plugin.Closed += (sender, a) => semaphore.Release();[m
+[32m+[m[32m            plugin.Closed += (sender, a) =>[m
+[32m+[m[32m            {[m
+[32m+[m[32m                logger.Debug(Resources.PluginClosed);[m
+[32m+[m[32m                semaphore.Release();[m
+[32m+[m[32m            };[m
+ [m
+             bool complete = await semaphore.WaitAsync(timeout, cancellationToken).ConfigureAwait(continueOnCapturedContext: false);[m
+ [m
+[1mdiff --git a/CredentialProvider.Microsoft/RequestHandlers/InitializeRequestHandler.cs b/CredentialProvider.Microsoft/RequestHandlers/InitializeRequestHandler.cs[m
+[1mindex 6631f5c..cdee606 100644[m
+[1m--- a/CredentialProvider.Microsoft/RequestHandlers/InitializeRequestHandler.cs[m
+[1m+++ b/CredentialProvider.Microsoft/RequestHandlers/InitializeRequestHandler.cs[m
+[36m@@ -24,6 +24,7 @@[m [mnamespace NuGetCredentialProvider.RequestHandlers[m
+ [m
+         public override Task<InitializeResponse> HandleRequestAsync(InitializeRequest request)[m
+         {[m
+[32m+[m[32m            Logger.Log(NuGet.Common.LogLevel.Verbose, Resources.PluginModeInitialized);[m
+             return Task.FromResult(new InitializeResponse(MessageResponseCode.Success));[m
+         }[m
+     }[m
+[1mdiff --git a/CredentialProvider.Microsoft/RequestHandlers/RequestHandlerBase.cs b/CredentialProvider.Microsoft/RequestHandlers/RequestHandlerBase.cs[m
+[1mindex edcad67..99a1672 100644[m
+[1m--- a/CredentialProvider.Microsoft/RequestHandlers/RequestHandlerBase.cs[m
+[1m+++ b/CredentialProvider.Microsoft/RequestHandlers/RequestHandlerBase.cs[m
+[36m@@ -35,11 +35,6 @@[m [mnamespace NuGetCredentialProvider.RequestHandlers[m
+         /// </summary>[m
+         public virtual CancellationToken CancellationToken { get; private set; } = CancellationToken.None;[m
+ [m
+[31m-        /// <summary>[m
+[31m-        /// Gets the current <see cref="IConnection"/>.[m
+[31m-        /// </summary>[m
+[31m-        public IConnection Connection { get; private set; }[m
+[31m-[m
+         /// <summary>[m
+         /// Gets the current <see cref="ILogger"/> to use for logging.[m
+         /// </summary>[m
+[36m@@ -51,14 +46,14 @@[m [mnamespace NuGetCredentialProvider.RequestHandlers[m
+             Stopwatch timer = new Stopwatch();[m
+             timer.Start();[m
+ [m
+[31m-            Connection = connection;[m
+[31m-[m
+             TRequest request = MessageUtilities.DeserializePayload<TRequest>(message);[m
+ [m
+[31m-            try {[m
+[32m+[m[32m            try[m
+[32m+[m[32m            {[m
+                 TResponse response = null;[m
+                 Logger.Verbose(string.Format(Resources.HandlingRequest, message.Type, message.Method, timer.ElapsedMilliseconds, message.Payload.ToString(Formatting.None)));[m
+[31m-                try {[m
+[32m+[m[32m                try[m
+[32m+[m[32m                {[m
+                     using (GetProgressReporter(connection, message, cancellationToken))[m
+                     {[m
+                         response = await HandleRequestAsync(request).ConfigureAwait(continueOnCapturedContext: false);[m
+[36m@@ -71,30 +66,25 @@[m [mnamespace NuGetCredentialProvider.RequestHandlers[m
+                     return;[m
+                 }[m
+                 Logger.Verbose(string.Format(Resources.SendingResponse, message.Type, message.Method, timer.ElapsedMilliseconds));[m
+[31m-                // If we did not send a cancel message, we must submit the response even if cancellationToken is canceled.[m
+[32m+[m
+[32m+[m[32m                // If we did not send a cancel message, we must submit the response even if cancellationToken is canceled. - TODO zarenner: why? needs explanation[m
+                 await responseHandler.SendResponseAsync(message, response, CancellationToken.None).ConfigureAwait(continueOnCapturedContext: false);[m
+ [m
+                 Logger.Verbose(string.Format(Resources.TimeElapsedAfterSendingResponse, message.Type, message.Method, timer.ElapsedMilliseconds));[m
+             }[m
+[31m-            catch (Exception ex) when (LogExceptionAndReturnFalse(ex))[m
+[32m+[m[32m            catch (Exception ex)[m
+             {[m
+[31m-                throw;[m
+[31m-            }[m
+[31m-[m
+[31m-            bool LogExceptionAndReturnFalse(Exception ex)[m
+[31m-            {[m
+[31m-                // don't report cancellations during shutdown, they're most likely not interesting.[m
+[31m-                if (ex is OperationCanceledException && Program.IsShuttingDown && !Debugger.IsAttached)[m
+[32m+[m[32m                // swallow cancellations during shutdown, they're most likely not interesting.[m
+[32m+[m[32m                if (ex is OperationCanceledException && Program.IsShuttingDown)[m
+                 {[m
+[31m-                    Logger.Verbose(Resources.ShuttingDown);[m
+[31m-                    return false;[m
+[32m+[m[32m                    Logger.Debug(string.Format(Resources.ShuttingDownCancellationError, ex.ToString()));[m
+[32m+[m[32m                    return;[m
+                 }[m
+ [m
+[31m-                Logger.Verbose(string.Format(Resources.ResponseHandlerException, message.Method, message.RequestId));[m
+[31m-                Logger.Verbose(ex.ToString());[m
+[31m-                return false;[m
+[32m+[m[32m                Logger.Verbose(string.Format(Resources.ResponseHandlerException, message.Method, message.RequestId) + Environment.NewLine + ex.ToString());[m
+[32m+[m[32m                throw;[m
+             }[m
+[31m-            [m
+[32m+[m
+             timer.Stop();[m
+         }[m
+ [m
+[1mdiff --git a/CredentialProvider.Microsoft/Resources.Designer.cs b/CredentialProvider.Microsoft/Resources.Designer.cs[m
+[1mindex 86a9043..05c8f69 100644[m
+[1m--- a/CredentialProvider.Microsoft/Resources.Designer.cs[m
+[1m+++ b/CredentialProvider.Microsoft/Resources.Designer.cs[m
+[36m@@ -19,7 +19,7 @@[m [mnamespace NuGetCredentialProvider {[m
+     // class via a tool like ResGen or Visual Studio.[m
+     // To add or remove a member, edit your .ResX file then rerun ResGen[m
+     // with the /str option, or rebuild your VS project.[m
+[31m-    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "15.0.0.0")][m
+[32m+[m[32m    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "16.0.0.0")][m
+     [global::System.Diagnostics.DebuggerNonUserCodeAttribute()][m
+     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()][m
+     internal class Resources {[m
+[36m@@ -550,6 +550,42 @@[m [mnamespace NuGetCredentialProvider {[m
+             }[m
+         }[m
+         [m
+[32m+[m[32m        /// <summary>[m
+[32m+[m[32m        ///   Looks up a localized string similar to Plugin is about to close.[m
+[32m+[m[32m        /// </summary>[m
+[32m+[m[32m        internal static string PluginBeforeClose {[m
+[32m+[m[32m            get {[m
+[32m+[m[32m                return ResourceManager.GetString("PluginBeforeClose", resourceCulture);[m
+[32m+[m[32m            }[m
+[32m+[m[32m        }[m
+[32m+[m[41m        [m
+[32m+[m[32m        /// <summary>[m
+[32m+[m[32m        ///   Looks up a localized string similar to Plugin closed.[m
+[32m+[m[32m        /// </summary>[m
+[32m+[m[32m        internal static string PluginClosed {[m
+[32m+[m[32m            get {[m
+[32m+[m[32m                return ResourceManager.GetString("PluginClosed", resourceCulture);[m
+[32m+[m[32m            }[m
+[32m+[m[32m        }[m
+[32m+[m[41m        [m
+[32m+[m[32m        /// <summary>[m
+[32m+[m[32m        ///   Looks up a localized string similar to Azure Artifacts credential provider initialized.[m
+[32m+[m[32m        /// </summary>[m
+[32m+[m[32m        internal static string PluginModeInitialized {[m
+[32m+[m[32m            get {[m
+[32m+[m[32m                return ResourceManager.GetString("PluginModeInitialized", resourceCulture);[m
+[32m+[m[32m            }[m
+[32m+[m[32m        }[m
+[32m+[m[41m        [m
+[32m+[m[32m        /// <summary>[m
+[32m+[m[32m        ///   Looks up a localized string similar to Plugin threw OperationCanceledException.[m
+[32m+[m[32m        /// </summary>[m
+[32m+[m[32m        internal static string PluginThrewOperationCanceledException {[m
+[32m+[m[32m            get {[m
+[32m+[m[32m                return ResourceManager.GetString("PluginThrewOperationCanceledException", resourceCulture);[m
+[32m+[m[32m            }[m
+[32m+[m[32m        }[m
+[32m+[m[41m        [m
+         /// <summary>[m
+         ///   Looks up a localized string similar to Timed out waiting for plug-in operations to complete.[m
+         /// </summary>[m
+[36m@@ -659,11 +695,12 @@[m [mnamespace NuGetCredentialProvider {[m
+         }[m
+         [m
+         /// <summary>[m
+[31m-        ///   Looks up a localized string similar to Credential provider shutting down..[m
+[32m+[m[32m        ///   Looks up a localized string similar to During credential provider shutdown, a cancellation error occurred:[m
+[32m+[m[32m        ///{0}.[m
+         /// </summary>[m
+[31m-        internal static string ShuttingDown {[m
+[32m+[m[32m        internal static string ShuttingDownCancellationError {[m
+             get {[m
+[31m-                return ResourceManager.GetString("ShuttingDown", resourceCulture);[m
+[32m+[m[32m                return ResourceManager.GetString("ShuttingDownCancellationError", resourceCulture);[m
+             }[m
+         }[m
+         [m
+[1mdiff --git a/CredentialProvider.Microsoft/Resources.resx b/CredentialProvider.Microsoft/Resources.resx[m
+[1mindex 799b742..df53919 100644[m
+[1m--- a/CredentialProvider.Microsoft/Resources.resx[m
+[1m+++ b/CredentialProvider.Microsoft/Resources.resx[m
+[36m@@ -424,8 +424,9 @@[m [mDevice Flow Authentication Timeout[m
+   <data name="RequestHandlerCancelingExceptionMessage" xml:space="preserve">[m
+     <value>Ignoring a cancellation exception during request handling. Exception: {0}, Message: {1}</value>[m
+   </data>[m
+[31m-  <data name="ShuttingDown" xml:space="preserve">[m
+[31m-    <value>Credential provider shutting down.</value>[m
+[32m+[m[32m  <data name="ShuttingDownCancellationError" xml:space="preserve">[m
+[32m+[m[32m    <value>During credential provider shutdown, a cancellation error occurred:[m
+[32m+[m[32m{0}</value>[m
+   </data>[m
+   <data name="StartRequestHandlerStopwatch" xml:space="preserve">[m
+     <value>Starting stopwatch for {1} {2}</value>[m
+[36m@@ -439,4 +440,16 @@[m [mDevice Flow Authentication Timeout[m
+   <data name="SessionTokenCacheMutexMiss" xml:space="preserve">[m
+     <value>Another instance of CredentialProvider is accessing the credential cache, waiting for it to become available.</value>[m
+   </data>[m
+[32m+[m[32m  <data name="PluginModeInitialized" xml:space="preserve">[m
+[32m+[m[32m    <value>Azure Artifacts credential provider initialized</value>[m
+[32m+[m[32m  </data>[m
+[32m+[m[32m  <data name="PluginThrewOperationCanceledException" xml:space="preserve">[m
+[32m+[m[32m    <value>Plugin threw OperationCanceledException</value>[m
+[32m+[m[32m  </data>[m
+[32m+[m[32m  <data name="PluginBeforeClose" xml:space="preserve">[m
+[32m+[m[32m    <value>Plugin is about to close</value>[m
+[32m+[m[32m  </data>[m
+[32m+[m[32m  <data name="PluginClosed" xml:space="preserve">[m
+[32m+[m[32m    <value>Plugin closed</value>[m
+[32m+[m[32m  </data>[m
+ </root>[m
+\ No newline at end of file[m
+[1mdiff --git a/CredentialProvider.Microsoft/Util/ExtensionMethods.cs b/CredentialProvider.Microsoft/Util/ExtensionMethods.cs[m
+[1mindex 4b1bcd6..ad7e10d 100644[m
+[1m--- a/CredentialProvider.Microsoft/Util/ExtensionMethods.cs[m
+[1m+++ b/CredentialProvider.Microsoft/Util/ExtensionMethods.cs[m
+[36m@@ -64,6 +64,16 @@[m [mnamespace NuGetCredentialProvider.Util[m
+             logger.Log(LogLevel.Verbose, message);[m
+         }[m
+ [m
+[32m+[m[32m        /// <summary>[m
+[32m+[m[32m        /// Writes a <see cref="LogLevel.Debug"/> event message to the <see cref="ILogger"/> using the specified message.[m
+[32m+[m[32m        /// </summary>[m
+[32m+[m[32m        /// <param name="logger">A <see cref="ILogger"/> instance to write the message to.</param>[m
+[32m+[m[32m        /// <param name="message">The message.</param>[m
+[32m+[m[32m        public static void Debug(this ILogger logger, string message)[m
+[32m+[m[32m        {[m
+[32m+[m[32m            logger.Log(LogLevel.Debug, message);[m
+[32m+[m[32m        }[m
+[32m+[m
+         /// <summary>[m
+         /// Converts the current <see cref="Uri"/> with just the host by discarding the other parts like path and querystrings.[m
+         /// </summary>[m
